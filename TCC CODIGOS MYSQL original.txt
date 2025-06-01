@@ -1,0 +1,195 @@
+***TCC CODIGOS MYSQL***
+
+
+
+
+import os
+import threading
+from datetime import datetime, timedelta
+
+
+LOG_DIR = r"C:\Users\gabri\Downloads\tcc_gabi"
+os.makedirs(LOG_DIR, exist_ok=True)
+
+# Contadores globais
+cpf_inicial = 10000000001
+codigo_produto_inicial = 100
+id_venda_inicial = 1
+
+# Listas para controle de dados gerados
+clientes_gerados = []
+produtos_gerados = []
+vendas_gerados = []
+
+# Controle de concorrência
+lock = threading.Lock()
+
+
+# Geração de datas
+def gerar_data(indice):
+    data = datetime.now() - timedelta(days=indice * 20)
+    return data.strftime('%Y-%m-%d')
+
+
+#Geração de INSERT de Cliente
+def gerar_insert_cliente():
+    global cpf_inicial
+    with lock:
+        cpf = str(cpf_inicial)
+        cpf_inicial += 1
+        clientes_gerados.append(cpf)
+    nome = f"Cliente_{cpf}"
+    telefone = f"(11)9{int(cpf) % 10000:04d}-{int(cpf) % 10000:04d}"
+    data_nasc = gerar_data(len(clientes_gerados))
+    return f"INSERT INTO Cliente (CPF, Nome, Telefone, Data_Nasci) VALUES ('{cpf}', '{nome}', '{telefone}', '{data_nasc}');"
+
+
+#Geração de INSERT de Produto
+def gerar_insert_produto():
+    global codigo_produto_inicial
+    with lock:
+        codigo = codigo_produto_inicial
+        codigo_produto_inicial += 1
+        produtos_gerados.append(codigo)
+    nome = f"Produto_{codigo}"
+    qtd = 10 + (codigo % 50)
+    valor = round(50 + (codigo % 100) * 2.5, 2)
+    return f"INSERT INTO Produto (Codigo, Nome, Quantidade, Valor) VALUES ({codigo}, '{nome}', {qtd}, {valor});"
+
+
+#Geração de INSERT de Venda/Compra
+def gerar_insert_venda():
+    global id_venda_inicial
+    with lock:
+        if not clientes_gerados or not produtos_gerados:
+            return "-- Sem clientes ou produtos suficientes para gerar venda"
+        venda_id = id_venda_inicial
+        id_venda_inicial += 1
+        cpf = clientes_gerados[venda_id % len(clientes_gerados)]
+        prod_cod = produtos_gerados[venda_id % len(produtos_gerados)]
+        vendas_gerados.append(venda_id)
+    data_venda = gerar_data(len(vendas_gerados))
+    valor = round(100 + (prod_cod % 10) * 15.5, 2)
+    return f"INSERT INTO VendaCompra (ID, Prod_Cod, Clie_CPF, Data_Venda, Valor) VALUES ({venda_id}, {prod_cod}, '{cpf}', '{data_venda}', {valor});"
+
+
+#Worker com Threads
+def worker(qtd, arquivo, tipo):
+    with open(arquivo, "a", encoding="utf-8") as f:
+        for _ in range(qtd):
+            if tipo == 'cliente':
+                sql = gerar_insert_cliente()
+            elif tipo == 'produto':
+                sql = gerar_insert_produto()
+            elif tipo == 'venda':
+                sql = gerar_insert_venda()
+            else:
+                sql = "-- Tipo desconhecido"
+            f.write(sql + "\n")
+
+
+# Função para rodar threads por tipo
+def gerar_inserts(tipo, total, qtd_threads, arquivo):
+    qtd_por_thread = total // qtd_threads
+    threads = []
+
+    print(f"Iniciando geração de {total} {tipo}(s) com {qtd_threads} thread(s)...")
+
+    with open(arquivo, "a", encoding="utf-8") as f:
+        f.write(f"\n-- === Inserções de {tipo.capitalize()} ===\n")
+
+    for _ in range(qtd_threads):
+        t = threading.Thread(target=worker, args=(qtd_por_thread, arquivo, tipo))
+        threads.append(t)
+        t.start()
+
+    for t in threads:
+        t.join()
+
+    print(f" Inserções de {tipo} concluídas!\n")
+
+
+#Execução Principal
+def main():
+    # Configurações
+    total_clientes = 100
+    total_produtos = 100
+    total_vendas = 200
+
+    qtd_threads = 4  # Número de threads para cada operação
+
+    nome_arquivo = os.path.join(LOG_DIR, "insert_tcc.sql")
+    open(nome_arquivo, 'w').close()  # Limpa arquivo
+
+    #  Geração organizada
+    gerar_inserts('cliente', total_clientes, qtd_threads, nome_arquivo)
+    gerar_inserts('produto', total_produtos, qtd_threads, nome_arquivo)
+    gerar_inserts('venda', total_vendas, qtd_threads, nome_arquivo)
+
+    print(f"Todos os INSERTs foram gerados no arquivo '{nome_arquivo}'")
+
+
+if __name__ == "__main__":
+    main()
+
+
+
+__________________________________
+
+
+import threading  # Biblioteca para trabalhar com threads em Python
+import mysql.connector  # Conector oficial para interagir com MySQL
+
+# Configurações de acesso ao banco de dados
+db_config = {
+    'host': 'localhost',
+    'user': 'seu_usuario',
+    'password': 'sua_senha',
+    'database': 'seu_banco'
+}
+
+# Lê todas as linhas do arquivo contendo comandos INSERT
+with open('inserts.txt', 'r') as f:
+    insert_commands = [linha.strip() for linha in f if linha.strip()]  # Remove espaços e ignora linhas vazias
+
+# Função que divide a lista de comandos igualmente entre N threads
+def dividir_blocos(lista, n):
+    return [lista[i::n] for i in range(n)]  # Distribuição round-robin: 0,4,8..., 1,5,9...
+
+# Função executada por cada thread
+def executar_inserts(comandos):
+    # Conexão individual com o banco de dados por thread
+    conn = mysql.connector.connect(**db_config)
+    cursor = conn.cursor()
+    
+    for comando in comandos:
+        try:
+            cursor.execute(comando)  # Executa cada comando INSERT
+        except mysql.connector.Error as e:
+            print(f"Erro ao executar: {comando}\n{e}")  # Captura e exibe erros
+    
+    conn.commit()  # Salva todas as alterações no banco
+    cursor.close()
+    conn.close()  # Fecha conexão após o término da thread
+
+# Cria 4 blocos de comandos para as 4 threads
+blocos = dividir_blocos(insert_commands, 4)
+threads = []
+
+# Criação e inicialização das threads
+for i in range(4):
+    t = threading.Thread(target=executar_inserts, args=(blocos[i],))  # Associa função à thread
+    t.start()  # Inicia a thread
+    threads.append(t)
+
+# Aguarda todas as threads finalizarem antes de continuar
+for t in threads:
+    t.join()
+
+print("Todos os inserts foram executados.")
+
+
+
+
+
+

@@ -1,0 +1,24 @@
+CREATE TABLE Cliente (
+    CPF VARCHAR(11) PRIMARY KEY,
+    Nome VARCHAR(100),
+    Telefone VARCHAR(20),
+    Data_Nasci DATE
+);
+
+CREATE TABLE Produto (
+    Codigo INT PRIMARY KEY,
+    Nome VARCHAR(100),
+    Quantidade INT,
+    Valor DECIMAL(10, 2)
+);
+
+CREATE TABLE VendaCompra (
+    ID INT AUTO_INCREMENT PRIMARY KEY,
+    Prod_Cod INT,
+    Clie_CPF VARCHAR(11),
+    Data_Venda DATE,
+    Valor DECIMAL(10, 2),
+    FOREIGN KEY (Prod_Cod) REFERENCES Produto(Codigo),
+    FOREIGN KEY (Clie_CPF) REFERENCES Cliente(CPF)
+);
+
